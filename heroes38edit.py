@@ -73,15 +73,16 @@ class GUI(tk.Tk):
     @staticmethod
     def func():
         df = pd.DataFrame(code.split("\n"))
-        df = df[0].str.split(expand=True)
+        df = df[0].str.replace(r"(?<!\+)[0-9]{4}", "").str.split(expand=True, n=2)
         df["group"] = ((~df[0].str.contains("[A-Z0-9]")).cumsum())
         df[0] = df[0].str.strip("：")
         group_map = df[~df[0].str.contains("[A-Z0-9]")].set_index("group")[0].to_dict()
         tmp = df[df[0].str.contains("[A-Z0-9]")].copy()
         tmp["Code"] = (tmp[0] + tmp[1]).str.lower()
+        tmp = tmp.fillna("")
         tmp = tmp[["Code", 2, "group"]]
         tmp.columns = ["Code", "Desc", "Group"]
-        tmp["Group"] = tmp["Group"].map(group_map).str.replace("代碼","")
+        tmp["Group"] = tmp["Group"].map(group_map).str.replace("代碼", "")
         return tmp, tmp.set_index("Code").to_dict(orient="index")
 
     def tree_sort(self, tv, col, reverse):
@@ -420,7 +421,7 @@ code = """禮物
  6D 04 馬超 飛翼槍 武力+52 智力+13 (長桿)
  6E 04 馬騰 虎頭湛金槍 武力+52 智力+13 (長桿)
  6F 04 張角 太平法杖 武力+13 智力+66 (遠攻法器)
- 70 04 張郃 丈八蛇矛 武力+52 智力+13 (長桿)
+ 70 04 張郃 斷魂槍 武力+52 智力+13 (長桿)
  71 04 張飛 丈八蛇矛 武力+52 智力+13 (長桿)
  72 04 張遼 破山劍 武力+36 智力+36 (單手)
  73 04 曹仁 含章刀 武力+36 智力+36 (單手) 
@@ -451,7 +452,7 @@ code = """禮物
  8C 04 關鳳 回鳳槍 武力+52 智力+13 (長桿)
  8D 04 孟獲 松紋雙斧 武力+36 智力+36 (雙手)
  8E 04 祝融夫人 綠藤彎弓 武力+52 智力+13 (遠射長弓)
- UJ傳說武器
+ 傳說武器
  99 08 UJ多賴把（傳說）武力+13 智力+88  2201
  9A 08 UJ玩具弓（傳說）武力+80 智力+26  2202
  9B 08 UJ玩具錘（傳說）武力+52 智力+52  2203
