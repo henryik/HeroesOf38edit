@@ -8,7 +8,7 @@ import os, shutil
 class GUI(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("三國群英傳8 簡易存檔修改v0.1")
+        self.title("三國群英傳8 存檔修改v0.2")
         self.iconbitmap("tools.ico")
         self.resizable(False, False)
         style = ttk.Style()
@@ -18,7 +18,7 @@ class GUI(tk.Tk):
         self.tree = ttk.Treeview(self, height=20)
         self.font = "Consolas 12"
         self.default = []
-        self.footer = []
+        self.header, self.footer = "", []
         self.labels = []
         self.data = []
         self.opened_file = None
@@ -38,7 +38,7 @@ class GUI(tk.Tk):
         self.tree["columns"] = header
         self.tree["displaycolumns"] = ("16位元", "物品", "數量", "種類")
         self.tree.grid(row=3, column=0, columnspan=6)
-        self.tree.tag_configure('T', font='Consolas 12')
+        self.tree.tag_configure('T', font='Consolas 10')
         self.t_vsb = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
         self.t_vsb.grid(row=3, column=8, sticky="ns")
         self.tree.configure(yscrollcommand=self.t_vsb.set)
@@ -63,6 +63,9 @@ class GUI(tk.Tk):
         menuBar.add_command(label="關於", command=lambda: AboutWin(self))
         self.config(menu=menuBar)
 
+    def add_item(self):
+        self.tree.selection_set(self.tree.insert("", 0, values=("???","???","01",1,"???"), tags="T"))
+
     @staticmethod
     def dec_to_hex_rev(i):
         s = hex(i)[2:]
@@ -73,15 +76,16 @@ class GUI(tk.Tk):
     @staticmethod
     def func():
         df = pd.DataFrame(code.split("\n"))
-        df = df[0].str.split(expand=True)
+        df = df[0].str.replace(r"(?<!\+)[0-9]{4}", "").str.split(expand=True, n=2)
         df["group"] = ((~df[0].str.contains("[A-Z0-9]")).cumsum())
         df[0] = df[0].str.strip("：")
         group_map = df[~df[0].str.contains("[A-Z0-9]")].set_index("group")[0].to_dict()
         tmp = df[df[0].str.contains("[A-Z0-9]")].copy()
         tmp["Code"] = (tmp[0] + tmp[1]).str.lower()
+        tmp = tmp.fillna("")
         tmp = tmp[["Code", 2, "group"]]
         tmp.columns = ["Code", "Desc", "Group"]
-        tmp["Group"] = tmp["Group"].map(group_map).str.replace("代碼","")
+        tmp["Group"] = tmp["Group"].map(group_map).str.replace("代碼", "")
         return tmp, tmp.set_index("Code").to_dict(orient="index")
 
     def tree_sort(self, tv, col, reverse):
@@ -97,10 +101,12 @@ class GUI(tk.Tk):
         if isinstance(event.widget, ttk.Treeview):
             iid = self.tree.identify_row(event.y)
             if not iid:
+                self.open_file()
                 return
             rmenu = tk.Menu(None, tearoff=0, takefocus=0)
             item_display = tk.Menu(self, tearoff=0)
             amount_display = tk.Menu(self, tearoff=0)
+            rmenu.add_command(label=" 新增物品", font="微軟正黑體 9", command=self.add_item)
             rmenu.add_cascade(label=" 修改物品", menu=item_display, font="微軟正黑體 9")
             for i in self.imap["Group"].unique():
                 m = tk.Menu(self, tearoff=0)
@@ -144,18 +150,29 @@ class GUI(tk.Tk):
         self.df = None
         self.tree.delete(*self.tree.get_children())
         self.data = []
+        self.default = []
+        self.header, self.footer = "", []
         self.opened_file = None
         self.group_map = None
         self.path = ""
 
+    @staticmethod
+    def count_to_int(content):
+        cty_pat = "0000010f000000436f756e74727947616d6544617461"
+        pos = content.find(cty_pat)
+        s = content[pos - 4:pos]
+        return int("".join(map(str.__add__, s[-2::-2], s[-1::-2])), 16), s+cty_pat
+
     def save_file(self):
         start = []
         footer = "".join(self.footer[::-1])
-        res = "".join(self.default[::-1])+footer
+        res = self.header+"".join(self.default[::-1])+footer
+        item_count = 0
         for child in self.tree.get_children():
+            item_count += 1
             v = self.tree.item(child)["values"]
             start.append("ff22"+str(v[0]).rjust(4, "0")+"0000"+"ff22"+str(v[2]).rjust(2, "0")+"000000")
-        rep = "".join(start)+footer
+        rep = "ff22"+hex(item_count)[2:].rjust(2, "0")+"000000"+"".join(start)+footer
         try:
             shutil.copy2(self.path, self.path+".bak")
             self.msg_var.set("成功備份至 {}".format((self.path+'.bak').split("/")[-1]))
@@ -164,9 +181,12 @@ class GUI(tk.Tk):
             return
         with open(self.path, "rb") as f:
             content = f.read().hex()
+            d, old = self.count_to_int(content)
+            diff = d + 12*(item_count-int(self.header[4:6], 16))
+            new = hex(diff)[4:]+hex(diff)[2:4]+old[4:]
         with open(self.path, "wb") as e:
             try:
-                e.write(bytearray.fromhex(content.replace(res, rep)))
+                e.write(bytearray.fromhex(content.replace(res, rep).replace(old, new)))
                 messagebox.showinfo("成功", "已存檔至 {}".format(self.path.split('/')[-1]))
             except PermissionError:
                 messagebox.showerror("儲存失敗", "不能儲存檔案！")
@@ -182,9 +202,12 @@ class GUI(tk.Tk):
         gold, food = self.dec_to_hex_rev(gold), self.dec_to_hex_rev(food)
         end = self.opened_file.find(gold + food) - 12
         if end < 0:
-            messagebox.showerror("位置找尋失敗", "金錢或糧食數量錯誤！")
-            return
+            return messagebox.showerror("位置找尋失敗", "金錢或糧食數量錯誤！")
+        inf_p = 0
         while True:
+            inf_p += 1
+            if inf_p > 1000:
+                return messagebox.showerror("錯誤", "位置找尋失敗；先隨機獲取任何物品再嘗試")
             cur = self.opened_file[end - 24:end]
             left, right = cur[:12], cur[12:]
             if len(left.rstrip("0")) != 8 or len(right.rstrip("0")) > 6:
@@ -196,8 +219,10 @@ class GUI(tk.Tk):
             value = (left[4:8], item.get("Desc", "???"), right[4:6], int(right[4:6], 16), item.get("Group", "???"))
             self.data.append(value)
             if self.opened_file[end - 84:end].startswith("ff010000"):
+                self.header = self.opened_file[end - 36:end - 24]
                 break
             end -= 24
+
         self.df = pd.DataFrame(self.data, columns=["iHex", "iDesc", "nHex", "n", "Group"])
         for i in self.df.itertuples():
             self.tree.insert("", 0, iid=i[0], values=i[1:], tags="T")
@@ -211,7 +236,7 @@ class GUI(tk.Tk):
             if profile_no:
                 s_dir += f"\{profile_no[0]}"
         except:
-            pass
+            print ("Oh no")
         self.path = filedialog.askopenfilename(title=f"Select save file",
                                                filetypes=[("Save file", "*.bytes")],
                                                initialdir=s_dir)
@@ -233,7 +258,7 @@ class AboutWin(tk.Toplevel):
     """
     def __init__(self, master=None):
         super().__init__(master)
-        self.config(highlightbackground="grey",highlightthickness=2) #relief='solid',borderwidth=2
+        self.config(highlightbackground="grey", highlightthickness=2)
         self.grab_set()
         self.overrideredirect(True)
         self.geometry("217x180+{}+{}".format(master.winfo_x() + 210, master.winfo_y()+200))
@@ -251,17 +276,21 @@ class AboutWin(tk.Toplevel):
         about_info.config(font=("Calibri", 8))
         about_info.grid(row=3, column=0, columnspan=4)
         general = ["Kind:", "Version:"]
-        info = ["Savegame Editor", "0.1"]
+        info = ["存檔修改器", "0.2"]
         for i, (text, detail) in enumerate(zip(general,info)):
             tk.Label(self, text=text, font=("Calibri", 8)).grid(row=4 + i, column=0, sticky="ne")
             tk.Label(self, text=detail, font=("Calibri", 8), justify="left").grid(row=4 + i, column=1,
                                                                                   sticky="ws", columnspan=4)
-        about_info.insert("end",  "v0.1 - 2021/01/28\n"
+        about_info.insert("end",  "v0.2 - 2021/01/30\n"
+                                  "- 允許新增物品\n"
+                                  "- 修正傳說武器種類\n"
+                                  "- 修正重覆開啟錯誤\n"
+                                  "- 防止位置找尋錯誤時無限輪迴\n\n"
+                                  "v0.1 - 2021/01/28\n"
                                   "- 初版\n"
                                   "- 以金錢/糧食搜尋物品位置\n"
                           )
         about_info.bind("<Key>", "break")
-        self.title("關於存檔修改器v0.1")
         self.resizable(False, False)
         self.transient(master)
         self.bind("<Button-1>", lambda e: self.destroy())
@@ -420,7 +449,7 @@ code = """禮物
  6D 04 馬超 飛翼槍 武力+52 智力+13 (長桿)
  6E 04 馬騰 虎頭湛金槍 武力+52 智力+13 (長桿)
  6F 04 張角 太平法杖 武力+13 智力+66 (遠攻法器)
- 70 04 張郃 丈八蛇矛 武力+52 智力+13 (長桿)
+ 70 04 張郃 斷魂槍 武力+52 智力+13 (長桿)
  71 04 張飛 丈八蛇矛 武力+52 智力+13 (長桿)
  72 04 張遼 破山劍 武力+36 智力+36 (單手)
  73 04 曹仁 含章刀 武力+36 智力+36 (單手) 
@@ -451,7 +480,7 @@ code = """禮物
  8C 04 關鳳 回鳳槍 武力+52 智力+13 (長桿)
  8D 04 孟獲 松紋雙斧 武力+36 智力+36 (雙手)
  8E 04 祝融夫人 綠藤彎弓 武力+52 智力+13 (遠射長弓)
- UJ傳說武器
+ 傳說武器
  99 08 UJ多賴把（傳說）武力+13 智力+88  2201
  9A 08 UJ玩具弓（傳說）武力+80 智力+26  2202
  9B 08 UJ玩具錘（傳說）武力+52 智力+52  2203
